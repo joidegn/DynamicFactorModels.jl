@@ -11,6 +11,5 @@ julia> Pkg.clone("git://github.com/joidegn/DynamicFactorModels.jl.git")
 ```
 
 ## Features
-**Simulate and Estimate Dynamic factor models**
-**Preselect predictors using soft and hard thresholding
-    (see Bai, Jushan, and Serena Ng. "Forecasting economic time series using targeted predictors." Journal of Econometrics 146.2 (2008): 304-317.)**
+*Simulate and Estimate Dynamic factor models
+*Preselect predictors using soft and hard thresholding (see Bai, Jushan, and Serena Ng. "Forecasting economic time series using targeted predictors." Journal of Econometrics 146.2 (2008): 304-317.)
