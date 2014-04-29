@@ -1,9 +1,12 @@
 module DynamicFactorModels
 
 #using GLM
+using DataArrays
+using DataFrames
 using DimensionalityReduction
 using Distributions
 using GLMNet
+#using Fred
 
 # text represenation
 import StatsBase.predict
@@ -43,9 +46,27 @@ end
 function lag_vector{T<:Number}(vec::DataArray{T,1})
     DataArray([0, vec.data[1:end-1]], [true, vec.na[1:end-1]])
 end
+function lag_matrix{T<:Number}(matr::Array{T, 2})
+    DataFrame([lag_vector(matr[:, col]) for col in 1:size(matr)[2]])
+end
+function lag_matrix(matr::DataFrame)
+    DataFrame([lag_vector(matr[:, col]) for col in 1:size(matr)[2]])
+end
+
+
+function factor_model_DGP(T::Int, N::Int)  # T: length of series, N: number of variables
+    # see e.g. Breitung and Eickmeier, 2011 p. 72
+    sigma = rand(Uniform(0.5, 1.5), N)
+    f = randn(T, N)  # not specified in the paper
+    lambda = randn(1, N) .+ 1  # N(1,1)  TODO: insert a break here? (see page 72 of Breitung)
+    epsilon = randn(T, N)*sigma
+    x = lambda .* f + epsilon  # TODO: inconsistency in naming schemes of Breitung and Bai, Ng. Take a look at Stock, Watson (2002)
+    return()
+end
 
 normalize(A::Matrix) = (A.-mean(A,1))./std(A,1) # normalize (i.e. center and rescale) Matrix A
 normalize(A::Matrix, by) = (A.-by[1])./by[2] # normalize (i.e. center and rescale) Matrix A by given (mean, stddev)-tuple
+
     
 
 function targeted_predictors(y::Array{Float64,1}, w::Matrix{Float64}, x::Matrix{Float64}; thresholding::String="hard")
