@@ -17,18 +17,6 @@ export DynamicFactorModel, predict
 # allow formulae to be updated by "adding" a string to them  TODO: pull request to DataFrames.jl?
 #+(formula::Formula, str::ASCIIString) = Formula(formula.lhs, convert(Symbol, *(string(formula.rhs), " + ", str)))
 
-function Base.show(io::IO, dfm::DynamicFactorModel)
-    @printf io "Dynamic Factor Model\n"
-    @printf io "Dimensions of X: %s\n" size(dfm.x)
-    @printf io "Number of factors used: %s\n" sum(dfm.factor_columns)
-    @printf io "Factors calculated by: %s\n" dfm.factor_type
-end
-
-function predict(dfm::DynamicFactorModel, w, x)  # prediction needs w and (original i.e. non-transformed) x
-    design_matrix = hcat(w, get_factors(dfm, x))
-    return design_matrix*dfm.coefficients
-end
-
 function generate_ar(params=[0.4, 0.3, 0.2, 0.1], innovations=[], length_series=1004)  # for testing TODO: remove
     if isempty(innovations)
         innovations = randn(length_series)
