@@ -142,9 +142,68 @@ type DynamicFactorModel
     end
 end
 
+function Base.show(io::IO, dfm::DynamicFactorModel)
+    @printf io "Dynamic Factor Model\n"
+    @printf io "Dimensions of X: %s\n" size(dfm.x)
+    @printf io "Number of factors used: %s\n" sum(dfm.factor_columns)
+    @printf io "Factors calculated by: %s\n" dfm.factor_type
+end
+
+# prediction needs w and (original i.e. non-transformed) x
+function predict(dfm::DynamicFactorModel, w, x)
+    design_matrix = hcat(w, get_factors(dfm, x))
+    return design_matrix*dfm.coefficients
+end
+
+
 # transforms x to the space spanned by the factors and optionally only selects active factors
-function get_factors(dfm::DynamicFactorModel, x::Matrix, factors="active")  # type="active" returns only the active factors (which explain enough of the variance)
+#   type="active" returns only the active factors (which explain enough of the variance)
+function get_factors(dfm::DynamicFactorModel, x::Matrix, factors="active")
     (normalize(x[:, dfm.targeted_predictors], (mean(dfm.x), std(dfm.x)))*dfm.rotation)[:, factors=="active" ? dfm.factor_columns : (1:end)]
 end
+
+
+function make_forecasts(num_predictions=200)
+    # one step ahead pseudo out-of-sample forecasts
+    data = readtable("/home/joi/Documents/Konstanz/Masterarbeit/data/1959-2014_normalized.csv")
+    data_matrix = reduce(hcat, [convert(Array{Float64}, col) for col in data.columns[2:size(data.columns)[1]]])
+    #ids = map(string, names(data)[2:end])
+    #titles = series_titles(ids)  # TODO: does not work at the moment because ICU.jl and with it Requests.jl seems to be broken
+    T = size(data_matrix)[1] - 4  # we include 4 lags
+    y = data_matrix[:,1]  # TODO: this is not something we actually want to predict...
+    data_matrix = data_matrix[:, 2:end]
+    lag1 = lag_vector(y)
+    lag2 = lag_vector(lag1)
+    lag3 = lag_vector(lag2)
+    lag4 = lag_vector(lag3)
+    y = y[5:end]
+    w = hcat(ones(T), array(lag1[5:end]), array(lag2[5:end]), array(lag3[5:end]), array(lag4[5:end]))
+    x = data_matrix[5:end, :]
+
+    errors = zeros(num_predictions)
+    errors_targeted = zeros(num_predictions)
+    errors_ols = zeros(num_predictions)
+    for date_index in T-num_predictions+1:T
+        println("date index: $date_index")
+        let y=y[1:date_index], x=x[1:date_index, :], w=w[1:date_index, :]  # y, x and w are updated so its easier for humans to read the next lines
+            let newx=x[end, :], neww=w[end, :], newy=y[end], y=y[1:end-1], x=x[1:end-1, :], w=w[1:end-1, :]  # pseudo-one step ahead (keeps notation clean in the following lines)
+            #y=y[1:date_index]; x=x[1:date_index, :]; w=w[1:date_index, :]
+            #newx=x[end, :]; neww=w[end, :]; newy=y[end]; y=y[1:end-1]; x=x[1:end-1, :]; w=w[1:end-1, :]
+                res = DynamicFactorModel(y, w, x)
+                res_targeted = DynamicFactorModel(y, w, x; targeted_predictors=targeted_predictors(y, w, x; thresholding="soft"))
+                errors[date_index-(T-num_predictions)] = (newy-predict(res, neww, newx))[1]
+                errors_targeted[date_index-(T-num_predictions)] = (newy-predict(res_targeted, neww, newx))[1]
+                errors_ols[date_index-(T-num_predictions)] = (newy-hcat(w,x)*inv(hcat(w,x)'hcat(w,x))*hcat(w,x)'y)[1]
+            end
+        end
+    end
+    mse = mean(errors.^2)
+    mse_targeted = mean(errors_targeted.^2)
+    mse_ols = mean(errors_ols.^2)
+    return(mse, mse_targeted, mse_ols)
+end
+
+
+include("chowtest.jl")  # less essential code lives abroad
 
 end # module
