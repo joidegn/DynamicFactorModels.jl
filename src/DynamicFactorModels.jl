@@ -113,9 +113,26 @@ type DynamicFactorModel
         if factor_type == "principal components"
             pca_res = pca(x[:, targeted_predictors])
             pca_index = pca_res.cumulative_variance .< 0.95  # take 95% of variance TODO: add argument, maybe factor_type is a tuple?
+            # TODO: or replace with Bai Ng 2002: Determining the number of factors in approximate factor models
+            factors = pca_res.scores[:, pca_index]
+        elseif factor_type == "squared principal components"  # include squares of X
+            pca_res = pca([x[:, targeted_predictors] x[:, targeted_predictors].^2])
+            pca_index = pca_res.cumulative_variance .< 0.95  # take 95% of variance TODO: add argument, maybe factor_type is a tuple?
+            # TODO: or replace with Bai Ng 2002: Determining the number of factors in approximate factor models
+            factors = pca_res.scores[:, pca_index]
+        elseif factor_type == "quadratic principal components"  # include squares of X and interaction terms - better only use in combination with targeted_predictors
+            pca_cols = x[:, targeted_predictors]
+            for i in 1:size(x[:, targeted_predictors])[2]
+                for j in 1:size(x[:, targeted_predictors])[2]
+                    pca_cols = hcat(pca_cols, x[:, i].*x[:, j])
+                end
+            end
+            pca_res = pca(pca_cols)
+            pca_index = pca_res.cumulative_variance .< 0.95  # take 95% of variance TODO: add argument, maybe factor_type is a tuple?
+            # TODO: or replace with Bai Ng 2002: Determining the number of factors in approximate factor models
             factors = pca_res.scores[:, pca_index]
         end
-        in_model = [trues(size(w)[2]), pca_index]
+
         design_matrix = hcat(w, factors)
         coefficients = inv(design_matrix'design_matrix)*design_matrix'y
         residuals = y - design_matrix*coefficients
