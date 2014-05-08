@@ -6,13 +6,14 @@ using DataFrames
 using DimensionalityReduction
 using Distributions
 using GLMNet
+using Gadfly
 #using Fred
 
 # text represenation
 import StatsBase.predict
 #show()
 
-export DynamicFactorModel, predict, lag_vector, targeted_predictors
+export DynamicFactorModel, predict, lag_vector, targeted_predictors, factor_model_DGP, normalize
 
 # allow formulae to be updated by "adding" a string to them  TODO: pull request to DataFrames.jl?
 #+(formula::Formula, str::ASCIIString) = Formula(formula.lhs, convert(Symbol, *(string(formula.rhs), " + ", str)))
@@ -42,25 +43,30 @@ function lag_matrix(matr::DataFrame)
 end
 
 
-function factor_model_DGP(T::Int, N::Int, r::Int)  # T: length of series, N: number of variables, r dimension of factors
-    # see e.g. Breitung and Eickmeier, 2011 p. 72
-    #sigma = rand(Uniform(0.5, 1.5), N)
-    #f = randn(T, r)  # not specified in the paper
-    #lambda = randn(r, N) .+ 1  # N(1,1)  TODO: insert a break here? (see page 72 of Breitung)
-    #epsilon = randn(T, N)*sigma
-    #x = lambda .* f + epsilon  # TODO: inconsistency in naming schemes of Breitung and Bai, Ng. Take a look at Stock, Watson (2002)
+function factor_model_DGP(T::Int, N::Int, r::Int; model::String="Bai_Ng_2002")  # T: length of series, N: number of variables, r dimension of factors
+    if model=="Breitung_Kretschmer_2004"  # factors follow AR(1) process
+        # TODO
+    end
+    if model=="Breitung_Eickmeier_2011"
+        # TODO: unfinished, untested
+        sigma = rand(Uniform(0.5, 1.5), N)
+        f = randn(T, r)  # not specified in the paper
+        lambda = randn(r, N) .+ 1  # N(1,1)  TODO: insert a break here? (see page 72 of Breitung)
+        epsilon = randn(T, N)*sigma
+        x = lambda .* f + epsilon  # TODO: inconsistency in naming schemes of Breitung and Bai, Ng. Take a look at Stock, Watson (2002)
+    end
 
-
-    # or see Bai, Ng 2002, p. 202
-    f = randn(T, r)
-    lambda = randn(r, N)
-    theta = r  # base case in Bai, Ng 2002
-    epsilon_x = sqrt(theta)*randn(T, N)  # TODO: we could replace errors with AR(p) errors?
-    x = f * lambda + epsilon_x
-    beta = rand(Uniform(), r)
-    epsilon_y = randn(T)  # TODO: what should epsilon be?
-    y = f*beta + randn(T) # TODO: what should beta be?
-    return(y, x, f, lambda, epsilon_x, epsilon_y)
+    if model=="Bai_Ng_2002"
+        f = randn(T, r)
+        lambda = randn(r, N)
+        theta = r  # base case in Bai, Ng 2002
+        epsilon_x = sqrt(theta)*randn(T, N)  # TODO: we could replace errors with AR(p) errors?
+        x = f * lambda + epsilon_x
+        beta = rand(Uniform(), r)
+        epsilon_y = randn(T)  # TODO: what should epsilon be?
+        y = f*beta + epsilon_y # TODO: what should beta be?
+        return(y, x, f, lambda, epsilon_x, epsilon_y)
+    end
 end
 
 normalize(A::Matrix) = (A.-mean(A,1))./std(A,1) # normalize (i.e. center and rescale) Matrix A
@@ -105,78 +111,72 @@ function targeted_predictors(y::Array{Float64,1}, w::Matrix{Float64}, x::Matrix{
 end
 
 
-function number_of_factors_cumulative_variance(pca_result, threshold=0.95)
-    pca_result.cumulative_variance .< threshold  # take threshold% of variance 
-end
-
-
+# TODO: approximate principal components rather than principal components could be more efficient for N > T
+# TODO: time series structure of factors: how many lags of the factors to include?
 type DynamicFactorModel
     coefficients::Array{Float64, 1}
     coefficient_covariance::Matrix
     y::Array{Float64, 1}  # regressor
     w::Matrix  # regressands (e.g. lags of y, constant and variables known to affect y directly)
     x::Matrix  # variables to calculate factors from
-    design_matrix::Matrix
+    design_matrix::Matrix  # w and the factors
     targeted_predictors::BitArray
-    factor_columns::BitArray{1}  # columns of factors we use (which capture a certain percentage of the variation)
-    rotation::Matrix  # rotation matrix to calculate factors from x
+    number_of_factors::Int  # columns of factors we use (which capture a certain percentage of the variation e.g.)
+    rotation::Matrix  # rotation matrix to calculate factors from x  (inverse of factor loadings lambda?)
     t_stats::Array{Float64, 1}
-    residuals::Array{Float64, 1}
+    residuals::Array{Float64, 1}  # residuals of the regression of y on w and the factors
+    factor_residuals::Matrix  # residuals from the factor estimation  x = factors * lambda
     factor_type::String
+    number_of_factors_criterion::String
+    number_of_factors_criterion_value::Float64
 
-    #TODO: number_of_factors: one of "min_MSE", "BIC", ...?, chowtest?  NOTE: BIC and AIK can only be used when T>>N
-    function DynamicFactorModel(y::Array{Float64,1}, w::Matrix{Float64}, x::Matrix{Float64}; factor_type::String="principal components", targeted_predictors=1:size(x, 2))
-        if factor_type == "principal components"
-            pca_res = pca(x[:, targeted_predictors]; center=false, scale=false)
-            pca_index = pca_res.cumulative_variance .< 0.95  # take 95% of variance TODO: add argument, maybe factor_type is a tuple?
-            # TODO: or replace with Bai Ng 2002: Determining the number of factors in approximate factor models
-        elseif factor_type == "squared principal components"  # include squares of X
-            pca_res = pca([x[:, targeted_predictors] x[:, targeted_predictors].^2]; center=false, scale=false)
-            pca_index = pca_res.cumulative_variance .< 0.95  # take 95% of variance TODO: add argument, maybe factor_type is a tuple?
-            # TODO: or replace with Bai Ng 2002: Determining the number of factors in approximate factor models
-        elseif factor_type == "quadratic principal components"  # include squares of X and interaction terms - better only use in combination with targeted_predictors
-            pca_cols = x[:, targeted_predictors]  # columns to use for principal components
-            for i in 1:size(x[:, targeted_predictors], 2)
-                for j in 1:size(x[:, targeted_predictors], 2)
-                    pca_cols = hcat(pca_cols, x[:, i].*x[:, j])
-                end
-            end
-            pca_res = pca(pca_cols; center=false, scale=false)
-            pca_index = pca_res.cumulative_variance .< 0.95  # take 95% of variance
-            # TODO: or replace with Bai Ng 2002: Determining the number of factors in approximate factor models
-        end
-        factors = pca_res.scores  # TODO: check if correct factors are used (p 1136 on Bai Ng 2006)
-        factor_columns = pca_index  # the active factors for estimation
+    function DynamicFactorModel(y::Array{Float64,1}, w::Matrix{Float64}, x::Matrix{Float64}, number_of_factors_criterion::String="", factor_type::String="principal components", targeted_predictors=1:size(x, 2), number_of_factors::Int=minimum(size(x)))
+        # TODO: so far we only have a static factor model. factor loadings need to be defines as in Stock, Watson (2010) page 3
+        # TODO: include lagged factors into the regression (how many?)
+        factors, rotation, number_of_factors = calculate_factors(x, factor_type, targeted_predictors, number_of_factors)
+        # TODO: check if correct factors are used (p 1136 on Bai Ng 2006)
+        factor_residuals = x .- factors[:, 1:number_of_factors] * rotation[1:number_of_factors, :]  # TODO: active factors are considered. Is that correct?
 
-        design_matrix = hcat(w, factors[:, factor_columns])  # TODO: add lags of factors (Dynamic Factor Models!)
+        design_matrix = hcat(w, factors[:, 1:number_of_factors])
         coefficients = inv(design_matrix'design_matrix)*design_matrix'y
         residuals = y - design_matrix*coefficients
-        coefficient_covariance = inv(design_matrix'design_matrix)*(design_matrix'*diagm(residuals.^2)*design_matrix)*inv(design_matrix'design_matrix)
+        coefficient_covariance = inv(desi_matrix'design_matrix)*(design_matrix'*diagm(residuals.^2)*design_matrix)*inv(design_matrix'design_matrix)
         t_stats = coefficients./sqrt(diag(coefficient_covariance))
-        return new(coefficients, coefficient_covariance, y, w, x, design_matrix, targeted_predictors, factor_columns, pca_res.rotation, t_stats, residuals, factor_type)
+
+        if number_of_factors_criterion == ""
+            return(new(coefficients, coefficient_covariance, y, w, x, design_matrix, targeted_predictors, number_of_factors, rotation, t_stats, residuals, factor_residuals, factor_type, number_of_factors_criterion))
+        else
+            return(calculate_criterion(new(coefficients, coefficient_covariance, y, w, x, design_matrix, targeted_predictors, number_of_factors, rotation, t_stats, residuals, factor_residuals, factor_type, number_of_factors_criterion)))
+        end
     end
 
-    function DynamicFactorModel(y::Array{Float64,1}, w::Matrix{Float64}, x::Matrix{Float64}, number_of_factors_criterion::String; factor_type::String="principal components", targeted_predictors=1:size(x, 2))
+    function DynamicFactorModel(y::Array{Float64,1}, w::Matrix{Float64}, x::Matrix{Float64}, number_of_factors_criterion::String, factor_type::String="principal components", targeted_predictors=1:size(x, 2))
+        # number of factors to include is not given but a criterion --> we use the criterion to determine the number of factors
         # if number of factors are to be calculated according to a criterion we need to estimate the model until criterion is optimal
-        for number_of_factors in 1:size(x, 2)  # TODO: this will take forever
-            res = DynamicFactorModel(y, w, x; factor_type=factor_type, targeted_predictors=targeted_predictors)
-            criterion = calculate_criterion(res, number_of_factors_criterion)
-        end
+        models = [apply(DynamicFactorModel, (y, w, x, number_of_factors_criterion, factor_type, targeted_predictors, number_of_factors)) for number_of_factors in 1:size(x, 2)]  # we keep all the models in memory which can be a problem depending on the dimensions of x. TODO: will refactor later when debugging and testing is done
+        criteria = [model.number_of_factors_criterion_value for model in models]
+        return models[indmin(criteria)]  # keep the model with the best information criterium
     end
 end
 
 norm_vector{T<:Number}(vec::Array{T, 1}) = vec./norm(vec) # makes vector unit norm
 norm_matrix{T<:Number}(mat::Array{T, 2}) = mapslices(norm_vector, mat, 2)  # call norm_vector for each column
 
-calculate_criterion(res, number_of_factors_criterion) = res |> eval(symbol("criterion_$number_of_factors_ctierion"))
-residual_variance(dfm::DynamicFactorModel) = 1/size(dfm.x, 2) * sum(dfm.residuals'dfm.residuals./T)
-#criterion_PCp1(res) = res.
+function calculate_criterion(dfm::DynamicFactorModel)
+    number_of_factors_criterion = dfm.number_of_factors_criterion
+    dfm.number_of_factors_criterion_value = eval(symbol("criterion_$number_of_factors_criterion"))(dfm)
+    return(dfm)
+end
+factor_residual_variance(dfm::DynamicFactorModel) = sum(dfm.factor_residuals.^2)/apply(*, size(x))  # see page 201 of Bai Ng 2002
+#factor_residual_variance(dfm::DynamicFactorModel) = sum(mapslices(x->x'x/length(x), dfm.factor_residuals, 1))/size(dfm.x, 2)  # the same as above
+
+include("criteria.jl")  # defines the criteria in Bai and Ng 2002
 
 
 function Base.show(io::IO, dfm::DynamicFactorModel)
     @printf io "Dynamic Factor Model\n"
     @printf io "Dimensions of X: %s\n" size(dfm.x)
-    @printf io "Number of factors used: %s\n" sum(dfm.factor_columns)
+    @printf io "Number of factors used: %s\n" dfm.number_of_factors
     @printf io "Factors calculated by: %s\n" dfm.factor_type
 end
 
@@ -187,60 +187,81 @@ function predict(dfm::DynamicFactorModel, w, x)
 end
 
 
+# calculate the factors and the rotation matrix to transform data into the space spanned by the factors
+function calculate_factors(x::Matrix, factor_type::String, targeted_predictors=1:size(x, 2), number_of_factors=minimum(size(x)))
+    if factor_type == "principal components"
+        pca_res = pca(x[:, targeted_predictors]; center=false, scale=false)
+        max_factor_number = minimum(size(x))
+    elseif factor_type == "squared principal components"  # include squares of X
+        pca_res = pca([x[:, targeted_predictors] x[:, targeted_predictors].^2]; center=false, scale=false)
+        max_factor_number = minimum([size(x, 1), size(x,2)*2])
+    elseif factor_type == "quadratic principal components"  # include squares of X and interaction terms - better only use in combination with targeted_predictors
+        pca_cols = x[:, targeted_predictors]  # columns to use for principal components
+        for i in 1:size(x[:, targeted_predictors], 2)
+            for j in 1:size(x[:, targeted_predictors], 2)
+                pca_cols = hcat(pca_cols, x[:, i].*x[:, j])
+            end
+        end
+        max_factor_number = minimum(size(pca_cols))
+        pca_res = pca(pca_cols; center=false, scale=false)
+        # TODO: or replace with Bai Ng 2002: Determining the number of factors in approximate factor models
+    end
+    if number_of_factors > max_factor_number
+        number_of_factors = max_factor_number
+        warn("can not estimate more than `minimum(size(x))` factors with $factor_type. Number of factors set to $number_of_factors")
+    end
+    return pca_res.scores, sqrt(size(x, 2))*pca_res.rotation, number_of_factors  # TODO: not sure about the sqrt(...) I think this is only for T>N (see Bai Ng 2002 p 198)
+end
+
 # transforms x to the space spanned by the factors and optionally only selects active factors
 #   type="active" returns only the active factors (which explain enough of the variance)
 function get_factors(dfm::DynamicFactorModel, x::Matrix, factors="active")
-    (normalize(x[:, dfm.targeted_predictors], (mean(dfm.x), std(dfm.x)))*dfm.rotation)[:, factors=="active" ? dfm.factor_columns : (1:end)]
+    (normalize(x[:, dfm.targeted_predictors], (mean(dfm.x), std(dfm.x)))*dfm.rotation)[:, factors=="active" ? (1:dfm.number_of_factors) : (1:end)]
 end
 
 
-function make_forecasts(y, w, x; num_predictions=200)
+function pseudo_out_of_sample_forecasts(model, y, w, x, model_args...; num_predictions::Int=200)
     # one step ahead pseudo out-of-sample forecasts
-
+    T = length(y)
     predictions = zeros(num_predictions)
-    predictions_targeted = zeros(num_predictions)
-    predictions_ols = zeros(num_predictions)
     for date_index in T-num_predictions+1:T
         println("date index: $date_index")
         let y=y[1:date_index], x=x[1:date_index, :], w=w[1:date_index, :]  # y, x and w are updated so its easier for humans to read the next lines
             let newx=x[end, :], neww=w[end, :], newy=y[end], y=y[1:end-1], x=x[1:end-1, :], w=w[1:end-1, :]  # pseudo-one step ahead (keeps notation clean in the following lines)
-            #y=y[1:date_index]; x=x[1:date_index, :]; w=w[1:date_index, :]
-            #newx=x[end, :]; neww=w[end, :]; newy=y[end]; y=y[1:end-1]; x=x[1:end-1, :]; w=w[1:end-1, :]
-                res = DynamicFactorModel(y, w, x)
-                res_targeted = DynamicFactorModel(y, w, x; targeted_predictors=targeted_predictors(y, w, x; thresholding="soft"))
-                beta_ols = inv(hcat(w,x)'hcat(w,x))*hcat(w,x)'y
-                predictions[date_index-(T-num_predictions)] = (newy-predict(res, neww, newx))[1]
-                predictions_targeted[date_index-(T-num_predictions)] = (newy-predict(res_targeted, neww, newx))[1]
-                predictions_ols[date_index-(T-num_predictions)] = newy-(hcat(neww,newx)*beta_ols)[1]
+                args = length(model_args) == 0 ? (y, w, x) : (y, w, x, model_args)  # efficiency converns?
+                res = apply(model, args)
+                predictions[date_index-(T-num_predictions)] = (predict(res, neww, newx))[1]
             end
         end
     end
-    return(predictions, predictions_targeted, predictions_ols)
+    return(predictions)
 end
 
-#data = readtable("/home/joi/Documents/Konstanz/Masterarbeit/data/1959-2014_normalized.csv")
-#data_matrix = reduce(hcat, [convert(Array{Float64}, col) for col in data.columns[2:size(data.columns, 1)]])
-##ids = map(string, names(data)[2:end])
-##titles = series_titles(ids)  # TODO: does not work at the moment because ICU.jl and with it Requests.jl seems to be broken
-#T = size(data_matrix, 1) - 4  # we include 4 lags
-#y = data_matrix[:,1]  # TODO: this is not something we actually want to predict...
-#data_matrix = data_matrix[:, 2:end]
-#lag1 = lag_vector(y)
-#lag2 = lag_vector(lag1)
-#lag3 = lag_vector(lag2)
-#lag4 = lag_vector(lag3)
-#y = y[5:end]
-#w = hcat(ones(T), array(lag1[5:end]), array(lag2[5:end]), array(lag3[5:end]), array(lag4[5:end]))
-#x = data_matrix[5:end, :]
-#
-#predictions, predictions_targeted, predictions_ols = make_forecasts(y, w, x)
-#
+data = readtable("/home/joi/Documents/Konstanz/Masterarbeit/data/1959-2014_normalized.csv")
+data_matrix = reduce(hcat, [convert(Array{Float64}, col) for col in data.columns[2:size(data.columns, 1)]])
+#ids = map(string, names(data)[2:end])
+#titles = series_titles(ids)  # TODO: does not work at the moment because ICU.jl and with it Requests.jl seems to be broken
+T = size(data_matrix, 1) - 4  # we include 4 lags
+y = data_matrix[:,1]  # TODO: this is not something we actually want to predict...
+data_matrix = data_matrix[:, 2:end]
+lag1 = lag_vector(y)
+lag2 = lag_vector(lag1)
+lag3 = lag_vector(lag2)
+lag4 = lag_vector(lag3)
+y = y[5:end]
+w = hcat(ones(T), array(lag1[5:end]), array(lag2[5:end]), array(lag3[5:end]), array(lag4[5:end]))
+x = data_matrix[5:end, :]
+
+#@time predictions = pseudo_out_of_sample_forecasts(DynamicFactorModel, y, w, x)
 #mse = mean((predictions.-y[end-200, end]).^2)
-#mse_targeted = mean((predictions_targeted.-y[end-200, end]).^2)
-#mse_ols = mean((predictions_ols.-y[end-200, end]).^2)
+#predictions_frame = DataFrame(
+#    predictions=vcat(y[end-199:end], predictions, predictions_targeted, predictions_ols, predictions_average),
+#    method=split(^("true value,", 200) * ^("Static Factor Model,", 200) * ^("targeted Static Factor Model,", 200) * ^("OLS,", 200) * ^("Average,", 200), ",", 0, false)
+#)
+#set_default_plot_format(:png)
+#display(predictions_plot)
 
 
-
-include("chowtest.jl")  # less essential code lives abroad
+include("chowtest.jl")
 
 end # module
