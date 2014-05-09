@@ -175,6 +175,7 @@ function calculate_criterion(dfm::DynamicFactorModel)
 end
 factor_residual_variance(dfm::DynamicFactorModel) = sum(dfm.factor_residuals.^2)/apply(*, size(x))  # see page 201 of Bai Ng 2002
 #factor_residual_variance(dfm::DynamicFactorModel) = sum(mapslices(x->x'x/length(x), dfm.factor_residuals, 1))/size(dfm.x, 2)  # the same as above
+# and var(dfm.factor_residuals) is approximately the same as well
 
 include("criteria.jl")  # defines the criteria in Bai and Ng 2002
 
@@ -216,12 +217,12 @@ function calculate_factors(x::Matrix, factor_type::String, targeted_predictors=1
         number_of_factors = max_factor_number
         warn("can not estimate more than `minimum(size(x))` factors with $factor_type. Number of factors set to $number_of_factors")
     end
-    return pca_res.scores, sqrt(size(x, 2))*pca_res.rotation, number_of_factors  # TODO: not sure about the sqrt(...) I think this is only for T>N (see Bai Ng 2002 p 198)
+    return factors, loadings, number_of_factors  # TODO: not sure about the sqrt(...) I think this is only for T>N (see Bai Ng 2002 p 198)
 end
 
 # transforms x to the space spanned by the factors and optionally only selects active factors
 #   type="active" returns only the active factors (which explain enough of the variance)
-function get_factors(dfm::DynamicFactorModel, x::Matrix, factors="active")
+function get_factors(dfm::DynamicFactorModel, x::Matrix, factors="active")  # TODO: do I have to divide by N if T>N? (see Bai, Ng 2002 p. 198)
     (normalize(x[:, dfm.targeted_predictors], (mean(dfm.x), std(dfm.x)))*dfm.rotation)[:, factors=="active" ? (1:dfm.number_of_factors) : (1:end)]
 end
 
