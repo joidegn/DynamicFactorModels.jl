@@ -34,3 +34,10 @@ function criterion_ICp3(dfm::DynamicFactorModel)
     N_plus_T_by_NT = apply(+, size(dfm.x))/apply(*, size(dfm.x))
     log(factor_residual_variance(dfm)) + sum(dfm.number_of_factors)*log(minimum(size(dfm.x)))/minimum(size(dfm.x))
 end
+
+
+#  default criteria which are not quite consistent at least not when the number of factors is estimated TODO: why exactly is that?
+function criterion_BIC(dfm::DynamicFactorModel)
+    T, N = size(dfm.x)
+    factor_residual_variance(dfm) + dfm.number_of_factors * log(T)/T
+end
