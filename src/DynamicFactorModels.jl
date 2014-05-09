@@ -195,9 +195,24 @@ end
 
 
 # calculate the factors and the rotation matrix to transform data into the space spanned by the factors
-function calculate_factors(x::Matrix, factor_type::String, targeted_predictors=1:size(x, 2), number_of_factors=minimum(size(x)))
+function calculate_factors(x::Matrix, factor_type::String="principal components", targeted_predictors=1:size(x, 2), number_of_factors=minimum(size(x)))
+    T, N = size(x)  # T: time dimension, N cross-sectional dimension
     if factor_type == "principal components"
-        pca_res = pca(x[:, targeted_predictors]; center=false, scale=false)
+        #pca_res = pca(x[:, targeted_predictors]; center=false, scale=false)
+        # see Stock, Watson (1998)
+        if T > N
+            eigen_values, eigen_vectors = eig(x'x)
+            eigen_values, eigen_vectors = reverse(eigen_values), eigen_vectors[:, size(eigen_vectors, 2):-1:1]  # reverse the order from highest to lowest eigenvalue
+            loadings = sqrt(N) * eigen_vectors
+            factors = x*loadings/N
+            factors = factors*(factors'factors/T)^(1/2)  # TODO: not sure it is correct to rescale like this (see Bai, Ng 2002 p.198)
+        end
+        if N > T
+            eigen_values, eigen_vectors = eig(x*x')
+            eigen_values, eigen_vectors = reverse(eigen_values), eigen_vectors[:, size(eigen_vectors, 2):-1:1]  # reverse the order from highest to lowest eigenvalue
+            factors = sqrt(T) * eigen_vectors
+            loadings = factors'x/T
+        end
         max_factor_number = minimum(size(x))
     elseif factor_type == "squared principal components"  # include squares of X
         pca_res = pca([x[:, targeted_predictors] x[:, targeted_predictors].^2]; center=false, scale=false)
