@@ -131,17 +131,23 @@ type DynamicFactorModel
     number_of_factors_criterion_value::Float64
 
     function DynamicFactorModel(y::Array{Float64,1}, w::Matrix{Float64}, x::Matrix{Float64}, number_of_factors_criterion::String="", factor_type::String="principal components", targeted_predictors=1:size(x, 2), number_of_factors::Int=minimum(size(x)))
-        # TODO: so far we only have a static factor model. factor loadings need to be defines as in Stock, Watson (2010) page 3
+        # TODO: so far we only have a static factor model. factors need to be defined as in Stock, Watson (2010) page 3
         # TODO: include lagged factors into the regression (how many?)
         factors, rotation, number_of_factors = calculate_factors(x, factor_type, targeted_predictors, number_of_factors)
         # TODO: check if correct factors are used (p 1136 on Bai Ng 2006)
-        factor_residuals = x .- factors[:, 1:number_of_factors] * rotation[1:number_of_factors, :]  # TODO: active factors are considered. Is that correct?
+        factor_residuals = x .- factors[:, 1:number_of_factors] * rotation[:, 1:number_of_factors]'  # TODO: active factors are considered. Is that correct?
 
         design_matrix = hcat(w, factors[:, 1:number_of_factors])
         coefficients = inv(design_matrix'design_matrix)*design_matrix'y
         residuals = y - design_matrix*coefficients
-        coefficient_covariance = inv(desi_matrix'design_matrix)*(design_matrix'*diagm(residuals.^2)*design_matrix)*inv(design_matrix'design_matrix)
-        t_stats = coefficients./sqrt(diag(coefficient_covariance))
+        hat_matrix = design_matrix*inv(design_matrix'design_matrix)*design_matrix'
+        residual_variance = (residuals.^2)./(1.-diag(hat_matrix))  # HC 2
+        coefficient_covariance = inv(design_matrix'design_matrix)*(design_matrix'*diagm(residual_variance)*design_matrix)*inv(design_matrix'design_matrix)
+        if any(diag(coefficient_covariance).<0)   #TODO: fix heywood cases or whatever would cause this
+            t_stats = zeros(length(coefficients))  # TODO: this is unacceptable
+        else
+            t_stats = coefficients./(diag(coefficient_covariance).^(1/2))
+        end
 
         if number_of_factors_criterion == ""
             return(new(coefficients, coefficient_covariance, y, w, x, design_matrix, targeted_predictors, number_of_factors, rotation, t_stats, residuals, factor_residuals, factor_type, number_of_factors_criterion))
