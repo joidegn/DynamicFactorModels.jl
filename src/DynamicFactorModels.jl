@@ -170,7 +170,7 @@ function calculate_factors(x::Matrix, factor_type::String="principal components"
     if factor_type == "principal components"
         #pca_res = pca(x[:, targeted_predictors]; center=false, scale=false)
         # see Stock, Watson (1998)
-        if T > N
+        if T >= N
             eigen_values, eigen_vectors = eig(x'x)
             eigen_values, eigen_vectors = reverse(eigen_values), eigen_vectors[:, size(eigen_vectors, 2):-1:1]  # reverse the order from highest to lowest eigenvalue
             loadings = sqrt(N) * eigen_vectors
