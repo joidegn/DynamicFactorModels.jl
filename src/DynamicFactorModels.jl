@@ -14,39 +14,15 @@ import StatsBase.predict
 
 export DynamicFactorModel, predict, lag_vector, targeted_predictors, factor_model_DGP, normalize
 
-# allow formulae to be updated by "adding" a string to them  TODO: pull request to DataFrames.jl?
-#+(formula::Formula, str::ASCIIString) = Formula(formula.lhs, convert(Symbol, *(string(formula.rhs), " + ", str)))
 
-function generate_ar(params=[0.4, 0.3, 0.2, 0.1], innovations=[], length_series=1004)  # for testing TODO: remove
-    if isempty(innovations)
-        innovations = randn(length_series)
-    end
-    ar = innovations
-    for i in (length(params)+1):length_series
-        ar_term = (params'*ar[i-length(params):i-1])[1]
-        ar[i] = ar[i] + ar_term
-    end
-    ar
-end
-function lag_vector{T<:Number}(vec::Array{T,1})
-    DataArray([0, vec[1:end-1]], [true, falses(length(vec)-1)])
-end
-function lag_vector{T<:Number}(vec::DataArray{T,1})
-    DataArray([0, vec.data[1:end-1]], [true, vec.na[1:end-1]])
-end
-function lag_matrix{T<:Number}(matr::Array{T, 2})
-    DataFrame([lag_vector(matr[:, col]) for col in 1:size(matr, 2)])
-end
-function lag_matrix(matr::DataFrame)
-    DataFrame([lag_vector(matr[:, col]) for col in 1:size(matr, 2)])
-end
-
+include("utils.jl")
 
 function factor_model_DGP(T::Int, N::Int, r::Int; model::String="Bai_Ng_2002")  # T: length of series, N: number of variables, r dimension of factors
     if model=="Breitung_Kretschmer_2004"  # factors follow AR(1) process
         # TODO
     end
     if model=="Breitung_Eickmeier_2011"
+        bs = [1, 0.3, 0.5, 0.7, 1]
         # TODO: unfinished, untested
         sigma = rand(Uniform(0.5, 1.5), N)
         f = randn(T, r)  # not specified in the paper
@@ -67,9 +43,6 @@ function factor_model_DGP(T::Int, N::Int, r::Int; model::String="Bai_Ng_2002")  
         return(y, x, f, lambda, epsilon_x, epsilon_y)
     end
 end
-
-normalize(A::Matrix) = (A.-mean(A,1))./std(A,1) # normalize (i.e. center and rescale) Matrix A
-normalize(A::Matrix, by) = (A.-by[1])./by[2] # normalize (i.e. center and rescale) Matrix A by given (mean, stddev)-tuple
 
 function targeted_predictors(y::Array{Float64,1}, w::Matrix{Float64}, x::Matrix{Float64}; thresholding::String="hard")
     # Bai and Ng (2008) -> regress y on w and x and keep only the predictors x which are significant
@@ -158,14 +131,12 @@ type DynamicFactorModel
     function DynamicFactorModel(y::Array{Float64,1}, w::Matrix{Float64}, x::Matrix{Float64}, number_of_factors_criterion::String, factor_type::String="principal components", targeted_predictors=1:size(x, 2))
         # number of factors to include is not given but a criterion --> we use the criterion to determine the number of factors
         # if number of factors are to be calculated according to a criterion we need to estimate the model until criterion is optimal
+        # we can probably stop when the criterion starts growing, I think the criterion functions are convex
         models = [apply(DynamicFactorModel, (y, w, x, number_of_factors_criterion, factor_type, targeted_predictors, number_of_factors)) for number_of_factors in 1:size(x, 2)]  # we keep all the models in memory which can be a problem depending on the dimensions of x. TODO: will refactor later when debugging and testing is done
         criteria = [model.number_of_factors_criterion_value for model in models]
         return models[indmin(criteria)]  # keep the model with the best information criterium
     end
 end
-
-norm_vector{T<:Number}(vec::Array{T, 1}) = vec./norm(vec) # makes vector unit norm
-norm_matrix{T<:Number}(mat::Array{T, 2}) = mapslices(norm_vector, mat, 2)  # call norm_vector for each column
 
 function calculate_criterion(dfm::DynamicFactorModel)
     number_of_factors_criterion = dfm.number_of_factors_criterion
@@ -240,24 +211,7 @@ function get_factors(dfm::DynamicFactorModel, x::Matrix, factors="active")  # TO
     (normalize(x[:, dfm.targeted_predictors], (mean(dfm.x), std(dfm.x)))*dfm.rotation)[:, factors=="active" ? (1:dfm.number_of_factors) : (1:end)]
 end
 
-
-function pseudo_out_of_sample_forecasts(model, y, w, x, model_args...; num_predictions::Int=200)
-    # one step ahead pseudo out-of-sample forecasts
-    T = length(y)
-    predictions = zeros(num_predictions)
-    for date_index in T-num_predictions+1:T
-        println("date index: $date_index")
-        let y=y[1:date_index], x=x[1:date_index, :], w=w[1:date_index, :]  # y, x and w are updated so its easier for humans to read the next lines
-            let newx=x[end, :], neww=w[end, :], newy=y[end], y=y[1:end-1], x=x[1:end-1, :], w=w[1:end-1, :]  # pseudo-one step ahead (keeps notation clean in the following lines)
-                args = length(model_args) == 0 ? (y, w, x) : (y, w, x, model_args)  # efficiency converns?
-                res = apply(model, args)
-                predictions[date_index-(T-num_predictions)] = (predict(res, neww, newx))[1]
-            end
-        end
-    end
-    return(predictions)
-end
-
+            
 data = readtable("/home/joi/Documents/Konstanz/Masterarbeit/data/1959-2014_normalized.csv")
 data_matrix = reduce(hcat, [convert(Array{Float64}, col) for col in data.columns[2:size(data.columns, 1)]])
 #ids = map(string, names(data)[2:end])
