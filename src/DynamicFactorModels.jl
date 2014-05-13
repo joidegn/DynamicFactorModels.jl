@@ -3,10 +3,9 @@ module DynamicFactorModels
 #using GLM
 using DataArrays
 using DataFrames
-using DimensionalityReduction
 using Distributions
-using GLMNet
 using Gadfly
+#using GLMNet
 #using Fred
 
 # text represenation
