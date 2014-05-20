@@ -12,8 +12,7 @@ using Gadfly
 import StatsBase.predict
 #show()
 
-export DynamicFactorModel, predict, lag_vector, targeted_predictors, factor_model_DGP, normalize
-
+export DynamicFactorModel, predict, lag_vector, targeted_predictors, factor_model_DGP, normalize, pseudo_out_of_sample_forecasts 
 
 include("utils.jl")
 
@@ -236,7 +235,7 @@ x = data_matrix[5:end, :]
 #set_default_plot_format(:png)
 #display(predictions_plot)
 
-
+include("criteria.jl")  # defines the criteria in Bai and Ng 2002
 include("chowtest.jl")
 
 end # module

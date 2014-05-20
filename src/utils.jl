@@ -46,24 +46,40 @@ normalize(A::Matrix, by) = (A.-by[1])./by[2] # normalize (i.e. center and rescal
 norm_vector{T<:Number}(vec::Array{T, 1}) = vec./norm(vec) # makes vector unit norm
 norm_matrix{T<:Number}(mat::Array{T, 2}) = mapslices(norm_vector, mat, 2)  # call norm_vector for each column
 
+possemidef(x) = try 
+    chol(x)
+    return true
+catch
+    return false
+end
+
+function make_factor_model_design_matrix(w, factors, number_of_factors, number_of_factor_lags)
+    return(hcat(w, factors))  # TODO: unfinished business
+    design_matrix = hcat(w, factors)
+    for lag_num in 1:number_of_factor_lags
+        lag_matrix = 1
+    end
+end
 
 function pseudo_out_of_sample_forecasts(model, y, w, x, model_args...; num_predictions::Int=200)
     # one step ahead pseudo out-of-sample forecasts
     T = length(y)
     predictions = zeros(num_predictions)
+    true_values = zeros(num_predictions)
     for date_index in T-num_predictions+1:T
-        month = date_index -I+num_predictions
+        month = date_index - T+num_predictions
         println("month: $month")
         let y=y[1:date_index], x=x[1:date_index, :], w=w[1:date_index, :]  # y, x and w are updated so its easier for humans to read the next lines
             let newx=x[end, :], neww=w[end, :], newy=y[end], y=y[1:end-1], x=x[1:end-1, :], w=w[1:end-1, :]  # pseudo-one step ahead (keeps notation clean in the following lines)
-                args = length(model_args) == 0 ? (y, w, x) : (y, w, x, model_args)  # efficiency concerns?
+                args = length(model_args) == 0 ? (y, w, x) : tuple(y, w, x, model_args...)  # efficiency concerns?
                 res = apply(model, args)
-                predictions[date_index-(T-num_predictions)] = (predict(res, neww, newx))[1]
+                predictions[month] = (predict(res, neww, newx))[1]
+                true_values[month] = newy
             end
         end
     end
-    return(predictions)
+    return(predictions, true_values)
 end
 
-
+MSE(y, predictions) = sum((y-predictions).^2)/apply(*, size(y))
 
