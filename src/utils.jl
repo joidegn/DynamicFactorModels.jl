@@ -37,6 +37,7 @@ function flatten(arg, flat)
     flat
 end
 flatten(args...) = apply(flatten, (args, Array(Any, 0)))
+flatten(depth, args...) = apply(flatten, (args, Array(Any, 0)))
 
 
 normalize(A::Matrix) = (A.-mean(A,1))./std(A,1) # normalize (i.e. center and rescale) Matrix A
