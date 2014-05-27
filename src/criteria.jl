@@ -1,7 +1,17 @@
+
+
+
+
+factor_residual_variance(dfm::DynamicFactorModel) = sum(dfm.factor_residuals.^2)/apply(*, size(x))  # see page 201 of Bai Ng 2002
+#factor_residual_variance(dfm::DynamicFactorModel) = sum(mapslices(x->x'x/length(x), dfm.factor_residuals, 1))/size(dfm.x, 2)  # the same as above
+# and var(dfm.factor_residuals) is approximately the same as well
+
+
+
+
 function criterion_cumulative_variance(pca_result, threshold=0.95)   # simply use factors until a certain threshold of variance is reached
     pca_result.cumulative_variance .< threshold  # take threshold% of variance 
 end
-
 
 # PCp criteria as defined on page 201 of Bai and Ng 2002
 function criterion_PCp1(dfm::DynamicFactorModel)
