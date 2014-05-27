@@ -1,17 +1,6 @@
 # allow formulae to be updated by "adding" a string to them  TODO: pull request to DataFrames.jl?
 #+(formula::Formula, str::ASCIIString) = Formula(formula.lhs, convert(Symbol, *(string(formula.rhs), " + ", str)))
 
-function generate_ar(params=[0.4, 0.3, 0.2, 0.1], innovations=[], length_series=1004)  # for testing TODO: remove
-    if isempty(innovations)
-        innovations = randn(length_series)
-    end
-    ar = innovations
-    for i in (length(params)+1):length_series
-        ar_term = (params'*ar[i-length(params):i-1])[1]
-        ar[i] = ar[i] + ar_term
-    end
-    ar
-end
 function lag_vector{T<:Number}(vec::Array{T,1})
     DataArray([0, vec[1:end-1]], [true, falses(length(vec)-1)])
 end
@@ -84,3 +73,40 @@ end
 
 MSE(y, predictions) = sum((y-predictions).^2)/apply(*, size(y))
 
+function factor_model_DGP(T::Int, N::Int, r::Int; model::String="Bai_Ng_2002")  # T: length of series, N: number of variables, r dimension of factors
+    if model=="Breitung_Kretschmer_2004"  # factors follow AR(1) process
+        # TODO
+    end
+    if model=="Breitung_Eickmeier_2011"
+        bs = [1, 0.3, 0.5, 0.7, 1]
+        # TODO: unfinished, untested
+        sigma = rand(Uniform(0.5, 1.5), N)
+        f = randn(T, r)  # not specified in the paper
+        lambda = randn(r, N) .+ 1  # N(1,1)  TODO: insert a break here? (see page 72 of Breitung)
+        epsilon = randn(T, N)*sigma
+        x = lambda .* f + epsilon  # TODO this is wrong
+        # TODO: inconsistency in naming schemes of Breitung and Bai, Ng. Take a look at Stock, Watson (2002)
+    end
+
+    if model=="Bai_Ng_2002"
+        f = randn(T, r)
+        lambda = randn(N, r)
+        theta = r  # base case in Bai, Ng 2002
+        epsilon_x = sqrt(theta)*randn(T, N)  # TODO: we could replace errors with AR(p) errors?
+        x = f * lambda' + epsilon_x
+        beta = rand(Uniform(), r)
+        epsilon_y = randn(T)  # TODO: what should epsilon be?
+        y = f*beta + epsilon_y # TODO: what should beta be?
+        return(y, x, f, lambda, epsilon_x, epsilon_y)
+    end
+end
+
+function generate_ar(params=[0.4, 0.3, 0.2, 0.1], innovations=[])
+    ar = innovations
+    for i in (length(params)+1):length_series
+        ar_term = (params'*ar[i-length(params):i-1])[1]
+        ar[i] = ar[i] + ar_term
+    end
+    ar
+end
+generate_ar(params=[0.4, 0.3, 0.2, 0.1], size_series=(1004, )) = generate_ar(params, apply(randn, size_series))
