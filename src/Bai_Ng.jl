@@ -9,12 +9,6 @@ reduced_tuples1 = [(100, 40, 1), (100, 60, 1), (200, 60, 1), (500, 60, 1), (50, 
 reduced_tuples2 = [(100, 40, 3), (100, 60, 3), (200, 60, 3), (500, 60, 3), (50, 10, 3), (100, 10, 3), (100, 20, 3)]  # T, N, r combinations I can replicate fast
 reduced_tuples3 = [(100, 40, 5), (100, 60, 5), (200, 60, 5), (500, 60, 5), (50, 10, 5), (100, 10, 5), (100, 20, 5)]  # T, N, r combinations I can replicate fast
 
-@time results1 = replicate_table(reduced_tuples1); gc()
-@time results2 = replicate_table(reduced_tuples2); gc()
-@time results3 = replicate_table(reduced_tuples3); gc()
-results = vcat(results1, results2, results3)
-
-
 function replicate_table(sample_tuples, num_reps=1)  # replicate main information criteria of tables 1,2,3
     criteria = ["PCp1", "PCp2", "PCp3", "ICp1", "ICp2", "ICp3"]
     results = zeros(length(sample_tuples), length(criteria))
@@ -27,6 +21,7 @@ function replicate_table(sample_tuples, num_reps=1)  # replicate main informatio
                 println("tuple: ", sample_tuples[i], "\t repetition: ", rep)
                 y, x, f, lambda, epsilon_x, epsilon_y = apply(factor_model_DGP, sample_tuples[i])
                 x = normalize(x)
+
                 w = reshape(ones(length(y)), (length(y), 1))  # reshape to Array{Float64, 2}
                 #dfm = try 
                 dfm = DynamicFactorModel(y, w, x, criterion)
@@ -42,3 +37,9 @@ function replicate_table(sample_tuples, num_reps=1)  # replicate main informatio
     end
     results
 end
+
+
+@time results1 = replicate_table(reduced_tuples1); gc()
+@time results2 = replicate_table(reduced_tuples2); gc()
+@time results3 = replicate_table(reduced_tuples3); gc()
+results = vcat(results1, results2, results3)
