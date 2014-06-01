@@ -73,19 +73,20 @@ end
 
 MSE(y, predictions) = sum((y-predictions).^2)/apply(*, size(y))
 
-function factor_model_DGP(T::Int, N::Int, r::Int; model::String="Bai_Ng_2002")  # T: length of series, N: number of variables, r dimension of factors
+function factor_model_DGP(T::Int, N::Int, r::Int; model::String="Bai_Ng_2002", b=0)  # T: length of series, N: number of variables, r dimension of factors, b break size
     if model=="Breitung_Kretschmer_2004"  # factors follow AR(1) process
         # TODO
     end
     if model=="Breitung_Eickmeier_2011"
-        bs = [1, 0.3, 0.5, 0.7, 1]
-        # TODO: unfinished, untested
+        break_point = mod(T, 2) == 0 ? T/2 : ceil(T/2)  # note that the break occurs after the period break_point
         sigma = rand(Uniform(0.5, 1.5), N)
+        # note that r is equal to 1 in the paper
         f = randn(T, r)  # not specified in the paper
-        lambda = randn(r, N) .+ 1  # N(1,1)  TODO: insert a break here? (see page 72 of Breitung)
-        epsilon = randn(T, N)*sigma
-        x = lambda .* f + epsilon  # TODO this is wrong
-        # TODO: inconsistency in naming schemes of Breitung and Bai, Ng. Take a look at Stock, Watson (2002)
+        lambda_1 = randn(N, r) .+ 1  # N(1,1)
+        lambda_2 = randn(N, r) .+ 1 .+ b  # N(1,1)
+        epsilon = apply(hcat, [randn(T)*sigma[i] for i in 1:N])
+        x = vcat((f*lambda_1')[1:break_point, :], (f*lambda_2')[break_point+1:end, :]) + epsilon
+        return(rand(T), x, f, (lambda_1, lambda_2), epsilon)  # for this DGP y doesnt matter (Breitung and Eickmeier dont look at prediction of y)
     end
 
     if model=="Bai_Ng_2002"
@@ -99,6 +100,7 @@ function factor_model_DGP(T::Int, N::Int, r::Int; model::String="Bai_Ng_2002")  
         y = f*beta + epsilon_y # TODO: what should beta be?
         return(y, x, f, lambda, epsilon_x, epsilon_y)
     end
+
 end
 
 function generate_ar(params=[0.4, 0.3, 0.2, 0.1], innovations=[])
