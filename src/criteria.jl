@@ -2,9 +2,9 @@
 
 
 
-factor_residual_variance(dfm::DynamicFactorModel) = sum(dfm.factor_residuals.^2)/apply(*, size(x))  # see page 201 of Bai Ng 2002
+factor_residual_variance(dfm::DynamicFactorModel) = sum(dfm.factor_residuals.^2)/apply(*, size(dfm.x))  # see page 201 of Bai Ng 2002
 #factor_residual_variance(dfm::DynamicFactorModel) = sum(mapslices(x->x'x/length(x), dfm.factor_residuals, 1))/size(dfm.x, 2)  # the same as above
-# and var(dfm.factor_residuals) is approximately the same as well
+# and var(dfm.factor_residuals) is approximately the same as well but it probably corrects for small sample bias
 
 
 
