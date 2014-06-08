@@ -1,3 +1,4 @@
+using Distributions
 # allow formulae to be updated by "adding" a string to them  TODO: pull request to DataFrames.jl?
 #+(formula::Formula, str::ASCIIString) = Formula(formula.lhs, convert(Symbol, *(string(formula.rhs), " + ", str)))
 
@@ -32,6 +33,13 @@ flatten(depth, args...) = apply(flatten, (args, Array(Any, 0)))
 normalize(A::Matrix) = (A.-mean(A,1))./std(A,1) # normalize (i.e. center and rescale) Matrix A
 normalize(A::Matrix, by) = (A.-by[1])./by[2] # normalize (i.e. center and rescale) Matrix A by given (mean, stddev)-tuple
 
+function detrend(y::Array{Float64, 1})  # detrend a time series (i.e. regress on time and take residuals)
+    # TODO: unfinished
+end
+function make_stationary(y::Array{Float64, 1})  # difference series until stationary
+
+end
+
 
 norm_vector{T<:Number}(vec::Array{T, 1}) = vec./norm(vec) # makes vector unit norm
 norm_matrix{T<:Number}(mat::Array{T, 2}) = mapslices(norm_vector, mat, 2)  # call norm_vector for each column
@@ -41,14 +49,6 @@ possemidef(x) = try
     return true
 catch
     return false
-end
-
-function make_factor_model_design_matrix(w, factors, number_of_factors, number_of_factor_lags)
-    return(hcat(w, factors))  # TODO: unfinished business
-    design_matrix = hcat(w, factors)
-    for lag_num in 1:number_of_factor_lags
-        lag_matrix = 1
-    end
 end
 
 function pseudo_out_of_sample_forecasts(model, y, w, x, model_args...; num_predictions::Int=200)
@@ -78,15 +78,16 @@ function factor_model_DGP(T::Int, N::Int, r::Int; model::String="Bai_Ng_2002", b
         # TODO
     end
     if model=="Breitung_Eickmeier_2011"
-        break_point = mod(T, 2) == 0 ? T/2 : ceil(T/2)  # note that the break occurs after the period break_point
-        sigma = rand(Uniform(0.5, 1.5), N)
+        println("Generating Breitung and Eickmeier data with break b=", b)
+        break_point = mod(T, 2) == 0 ? int(T/2) : int(ceil(T/2))  # note that the break occurs after the period break_point
+        sigma = rand(Distributions.Uniform(0.5, 1.5), N)  # each variable has a different variance in the idiosyncratic error terms
         # note that r is equal to 1 in the paper
         f = randn(T, r)  # not specified in the paper
-        lambda_1 = randn(N, r) .+ 1  # N(1,1)
-        lambda_2 = randn(N, r) .+ 1 .+ b  # N(1,1)
+        Lambda = randn(N, r) .+ 1  # N(1,1)
+        lambda(t, i) = t < break_point ? Lambda[i, :] : Lambda[i, :] .+ b
         epsilon = apply(hcat, [randn(T)*sigma[i] for i in 1:N])
-        x = vcat((f*lambda_1')[1:break_point, :], (f*lambda_2')[break_point+1:end, :]) + epsilon
-        return(rand(T), x, f, (lambda_1, lambda_2), epsilon)  # for this DGP y doesnt matter (Breitung and Eickmeier dont look at prediction of y)
+        x = Float64[(f[t, :]' * lambda(t, i))[1] for t = 1:T, i in 1:N] + epsilon
+        return(rand(T), x, f, Lambda, epsilon)  # for this DGP y doesnt matter (Breitung and Eickmeier dont look at prediction of y)
     end
 
     if model=="Bai_Ng_2002"
@@ -95,7 +96,7 @@ function factor_model_DGP(T::Int, N::Int, r::Int; model::String="Bai_Ng_2002", b
         theta = r  # base case in Bai, Ng 2002
         epsilon_x = sqrt(theta)*randn(T, N)  # TODO: we could replace errors with AR(p) errors?
         x = f * lambda' + epsilon_x
-        beta = rand(Uniform(), r)
+        beta = rand(Distributions.Uniform(), r)
         epsilon_y = randn(T)  # TODO: what should epsilon be?
         y = f*beta + epsilon_y # TODO: what should beta be?
         return(y, x, f, lambda, epsilon_x, epsilon_y)
