@@ -18,10 +18,19 @@ parametric_bootstrap_DGP(dfm::DynamicFactorModel) = parametric_bootstrap_DGP(dfm
 # static factor models:
 
 
-function residual_bootstrap(dfm::DynamicFactorModel, B::Int, stat::Function)  # resample residuals
+function residual_bootstrap(dfm::DynamicFactorModel, B::Int, stat::Function)  # resample residuals TODO: what to do when we have a break?
+
+    function resample_x_block(from_indices, to_indices)  # resample given indices, function can be used to resample by block of residuals
+        dfm.factors[from_indices:to_indices, 1:dfm.number_of_factors]*dfm.loadings[:, 1:dfm.number_of_factors]' + dfm.factor_residuals[rand(Distributions.DiscreteUniform(from_indices, to_indices), length(from_indices:to_indices)), :]
+    end
+    function resample_x()
+        break_points = [1 dfm.break_indices' length(dfm.y)+1]
+        resampled_x = apply(vcat, [resample_x_block(break_points[i-1], break_points[i]-1) for i in 2:length(break_points)])
+    end
+
     stats = Array(Float64, B)
     for b in 1:B
-        resampled_x = dfm.factors[:, 1:dfm.number_of_factors]*dfm.loadings[:, 1:dfm.number_of_factors]' + dfm.factor_residuals[rand(Distributions.DiscreteUniform(1, length(dfm.y)), size(dfm.x, 1)), :] # TODO: not sure resampling over the T index is correct
+        resampled_x = resample_x()
         resampled_y = dfm.y  # TODO: resampling y is less interesting. This would be akin to checking a linear model for a break.
         resampled_w = dfm.w
         stats[b] = stat(DynamicFactorModel(resampled_y, resampled_w, resampled_x, dfm.number_of_factors, dfm.number_of_factors_criterion, dfm.factor_type, dfm.targeted_predictors, dfm.number_of_factor_lags, dfm.break_indices))
