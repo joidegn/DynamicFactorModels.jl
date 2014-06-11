@@ -15,8 +15,8 @@ type DynamicFactorModel
     number_of_factor_lags::Int64  # columns of factors we use (which capture a certain percentage of the variation e.g.)
     break_indices::Array{Int, 1}  # gives indices of breakpoints which are to be taken into account in estimation
     #rotation::Array{Float64, 2}  # rotation matrix to calculate factors from x (inverse of transpose of factor loadings lambda? Yes and also equal to factor loadings due to ortogonality?!)
-    factors::Array{Float64, 2}
-    loadings::Array{Float64, 2}
+    factors::Array{Array{Float64, 2}, 1} #Array{Float64, 2}
+    loadings::Array{Array{Float64, 2}, 1} #Array{Float64, 2}
     t_stats::Array{Float64, 1}
     residuals::Array{Float64, 1}  # residuals of the regression of y on w and the factors
     factor_residuals::Array{Float64, 2}  # residuals from the factor estimation  x = factors * lambda
@@ -28,30 +28,24 @@ type DynamicFactorModel
     function DynamicFactorModel(y::Array{Float64,1}, w::Matrix{Float64}, x::Matrix{Float64}, number_of_factors::Int64=ceil(minimum(size(x))/2), number_of_factors_criterion::String="", factor_type::String="principal components", targeted_predictors::BitArray=trues(size(x, 2)), number_of_factor_lags::Int64=0, break_indices::Array{Int64, 1}=Array(Int64, 0))
         # TODO: so far we only have a static factor model. factors need to be defined as in Stock, Watson (2010) page 3
         # TODO: include lagged factors into the regression (how many?)
-        factors, loadings, number_of_factors = calculate_factors(x, factor_type, targeted_predictors, number_of_factors)
+        factors, loadings, number_of_factors = calculate_factors(x, factor_type, targeted_predictors, number_of_factors, break_indices)
         # TODO: check if correct factors are used (p 1136 on Bai Ng 2006)
-        #rotation = inv(loadings')  # rotation Matrix which can be used to rotate X into factor space (follows from X = F*loadings'
-        factor_residuals = x .- factors[:, 1:number_of_factors] * loadings[:, 1:number_of_factors]'  # TODO: active factors are considered. Is that correct?
+        factor_residuals = x .- apply(vcat, [factors[i][:, 1:number_of_factors] * loadings[i][:, 1:number_of_factors]' for i in 1:length(factors)])  # we take account of possible breaks -> we calculate residuals per subperiod
         #factor_residuals = x - x*loadings[:, 1:number_of_factors]*inv(loadings[:, 1:number_of_factors]'loadings[:, 1:number_of_factors])*loadings[:, 1:number_of_factors]' # rescaled version from french dude
         # TODO: for lags we have to regress residuals on its lags and use info criterio to choose lag length p. this should be offloaded into another method
         # TODO: solve chicken and egg problem between number_of_factors and number_of_factor_lags. Both require residuals. --> maybe select one after the other repeatedly until convergence?
         # TODO: do the above e.g. factors, loadings, number_of_factors = augment_factors_by_lags(factors, number_of_factor_lags)  # TODO: do we have to 
         # for structural breaks we augment the design matrix with factors multiplied with index which is 0 from t in [1, ..., t*-1] 1 from T in [t*, ..., T]
 
-        design_matrix = make_factor_model_design_matrix(w, factors, number_of_factors, number_of_factor_lags)
+        design_matrix = make_factor_model_design_matrix(w, factors, number_of_factors, number_of_factor_lags, break_indices)
         coefficients = inv(design_matrix'design_matrix)*design_matrix'y
         residuals = y - design_matrix*coefficients
-        #hat_matrix = design_matrix*inv(design_matrix'design_matrix)*design_matrix'
-        #residual_variance = (residuals.^2)./(1.-diag(hat_matrix))  # HC 2
-        residual_variance = residuals.^2  # HC 0
+        hat_matrix = design_matrix*inv(design_matrix'design_matrix)*design_matrix'
+        residual_variance = (residuals.^2)./(1.-diag(hat_matrix))  # HC 2
+        #residual_variance = residuals.^2  # HC 0
         coefficient_covariance = inv(design_matrix'design_matrix)*(design_matrix'diagm(residual_variance)design_matrix)*inv(design_matrix'design_matrix)
         #coefficient_covariance = inv(design_matrix'design_matrix)*(1/length(residual_variance)*sum(residual_variance))
-        if any(diag(coefficient_covariance).<0)
-            warn("negative variance estimates. This is so haywood")
-            t_stats = zeros(size(design_matrix, 2))
-        else
-            t_stats = coefficients./(sqrt(diag(coefficient_covariance)))
-        end
+        t_stats = coefficients./(sqrt(diag(coefficient_covariance)))
 
         return(calculate_criterion(new(coefficients, coefficient_covariance, y, w, x, design_matrix, targeted_predictors, number_of_factors, number_of_factor_lags, break_indices, factors, loadings, t_stats, residuals, factor_residuals, factor_type, number_of_factors_criterion)))
     end
@@ -74,16 +68,13 @@ end
 
 
 # calculate the factors and the rotation matrix to transform data into the space spanned by the factors
-function calculate_factors(x::Matrix, factor_type::String="principal components", targeted_predictors=1:size(x, 2), number_of_factors=ceil(minimum(size(x))/2))
+function calculate_factors(x::Matrix, factor_type::String="principal components", targeted_predictors=1:size(x, 2), number_of_factors=ceil(minimum(size(x))/2), break_indices=[])
     T, N = size(x)  # T: time dimension, N cross-sectional dimension
-    if factor_type == "principal components"
-        #pca_res = pca(x[:, targeted_predictors]; center=false, scale=false)
+    break_indices = vcat(1, break_indices, T+1)
+
+    function principal_components(x)  # calculate factors and loadings for a given x matrix
         # see Stock, Watson (1998)
         if T >= N
-            #pca_res = pca(x; center=false, scale=false)
-            #loadings = pca_res.rotation  # actually inverse of transpose but this is the same due to ortogonality
-            #factors = pca_res.scores
-
             eigen_values, eigen_vectors = eig(x'x)
             eigen_values, eigen_vectors = reverse(eigen_values), eigen_vectors[:, size(eigen_vectors, 2):-1:1]  # reverse the order from highest to lowest eigenvalue
             loadings = sqrt(N) * eigen_vectors  # we may rescale the eigenvectors say Bai, Ng 2002
@@ -99,7 +90,14 @@ function calculate_factors(x::Matrix, factor_type::String="principal components"
             loadings = x'factors/T  # see e.g. Bai 2003 p.6 or Breitung, Eickmeier 2011 p. 80. Dimension of loadings is Nxr where r here is also N
             # betahat = loadings * chol(loadings'loadings/N)  # C. Hurlin from University of Orléans rescales like this
         end
-        # resultingly factors*loadings' estimates x
+            # resultingly factors*loadings' estimates x
+        return factors, loadings
+    end
+
+    if factor_type == "principal components"
+        factors_loadings = [principal_components(x[break_indices[i-1]:break_indices[i]-1, :]) for i in 2:length(break_indices)]
+        factors = convert(Array{Array{Float64, 2}, 1}, [factors_loadings[i][1] for i in 1:length(factors_loadings)])
+        loadings = convert(Array{Array{Float64, 2}, 1}, [factors_loadings[i][2] for i in 1:length(factors_loadings)])
         max_factor_number = ceil(minimum(size(x))/2)
     elseif factor_type == "squared principal components"  # include squares of X
         pca_res = pca([x[:, targeted_predictors] x[:, targeted_predictors].^2]; center=false, scale=false)
@@ -119,7 +117,7 @@ function calculate_factors(x::Matrix, factor_type::String="principal components"
         number_of_factors = max_factor_number
         warn("can not estimate more than `minimum(size(x))` factors with $factor_type. Number of factors set to $number_of_factors")
     end
-    return factors, loadings, number_of_factors  # TODO: not sure about the sqrt(...) I think this is only for T>N (see Bai Ng 2002 p 198)
+    return factors, loadings, number_of_factors
 end
 
 # transforms x to the space spanned by the factors and optionally only selects active factors
@@ -129,12 +127,9 @@ function get_factors(dfm::DynamicFactorModel, x::Matrix, factors="active")  # TO
     (normalize(x[:, dfm.targeted_predictors], (mean(dfm.x), std(dfm.x)))*dfm.rotation)[:, factors=="active" ? (1:dfm.number_of_factors) : (1:end)]
 end
 
-function make_factor_model_design_matrix(w, factors, number_of_factors, number_of_factor_lags)
-    return(hcat(w, factors[:, 1:number_of_factors]))  # TODO: unfinished business
-    design_matrix = hcat(w, factors)
-    for lag_num in 1:number_of_factor_lags
-        lag_matrix = 1
-    end
+function make_factor_model_design_matrix(w, factors, number_of_factors, number_of_factor_lags, break_indices)
+    return(hcat(w, apply(vcat, factors)[:, 1:number_of_factors]))  # we could assume breaks in the forecasting equation as well
+    # TODO: unfinished business: factor lags to get dynamic factor models (how many? see page 
 end
 
 function calculate_criterion(dfm::DynamicFactorModel)
